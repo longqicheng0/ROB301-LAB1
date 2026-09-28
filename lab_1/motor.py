@@ -1,4 +1,5 @@
 import math
+import numpy as np
 
 import rclpy
 from rclpy.node import Node
@@ -22,6 +23,29 @@ class MotorNode(Node):
         self.angular_speed = 0.5  # rad/s
         self.forward_duration = 1.0 / self.linear_speed
         self.angular_duration = 360 / (math.degrees(self.angular_speed))
+
+        self.start_pose = np.array([
+            [0.0], #x
+            [0.0], #y
+            [0.0], #theta
+        ])
+
+        self.goal_pose = np.array([
+            [200/100], #x - m
+            [15/100], #y - m
+            [math.radians(135)], #theta - radians
+        ])
+
+        self.x_travel = self.goal_pose[0,0] - self.start_pose[0,0]
+        self.y_travel = self.goal_pose[1,0] - self.start_pose[1,0]
+
+        self.diag_dist_travel = math.sqrt(self.x_travel**2 + self.y_travel**2) #distance travelled
+        self.diag_angle_travel = math.atan2(self.y_travel, self.x_travel) #heading angle 
+        self.final_angle_adjust = self.goal_pose[2,0] - self.diag_angle_travel #angle after travel
+
+        self.forward_duration = self.diag_dist_travel / self.linear_speed
+        self.first_turn_duration = self.diag_angle_travel / self.angular_speed
+        self.second_turn_duration = self.final_angle_adjust / self.angular_speed
 
         # --- Publishers ---
         self.cmd_vel_pub = self.create_publisher(TwistStamped, cmd_vel_topic, 10)
