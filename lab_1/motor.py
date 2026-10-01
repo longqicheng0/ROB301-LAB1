@@ -83,9 +83,9 @@ class MotorNode(Node):
         self.waypoint_index = 0
         self.phase = "initial_turn"
         self.phase_elapsed = 0.0
+        self.waypoint_duration = self.first_turn_duration + self.forward_duration + self.second_turn_duration
 
-        self.init_leg = self.prepare_leg
-
+        self.prepare_leg()
 
         # --- Publishers ---
         self.cmd_vel_pub = self.create_publisher(TwistStamped, cmd_vel_topic, 10)
@@ -109,9 +109,9 @@ class MotorNode(Node):
 
         self.diag_dist_travel = math.sqrt(self.x_travel**2 + self.y_travel**2) #distance travelled
         self.diag_angle_travel = math.atan2(self.y_travel, self.x_travel) #heading angle 
-        self.final_angle_adjust = self.goal_pose[2,0] - self.diag_angle_travel #angle after travel
 
-        self.forward_duration = self.diag_dist_travel / self.linear_speed
+
+        self.final_angle_adjust = self.goal_pose[2,0] - self.diag_angle_travel #angle after travel
         self.initial_angle_adjust = self.diag_angle_travel - self.waypoints[self.waypoint_index - 1][2,0]
 
 
@@ -130,7 +130,9 @@ class MotorNode(Node):
             self.final_angle_adjust = self.mod_final_angle - 2 * math.pi
         else:
             self.final_angle_adjust = self.mod_final_angle
-    
+
+        #info we need later
+        self.forward_duration = self.diag_dist_travel / self.linear_speed
         self.first_turn_duration = abs(self.initial_angle_adjust) / self.angular_speed
         self.second_turn_duration = abs(self.final_angle_adjust) / self.angular_speed
 
@@ -139,6 +141,7 @@ class MotorNode(Node):
         twist_stamped.header.stamp = self.get_clock().now().to_msg()
 
         #part 4.1
+        '''
         if self._state_elapsed < self.first_turn_duration: # "turn"
             twist_stamped.twist.linear.x = 0.0
             twist_stamped.twist.angular.z = self.angular_speed
@@ -150,6 +153,54 @@ class MotorNode(Node):
             twist_stamped.twist.angular.z = self.angular_speed           
         else:
             self.get_logger().info("Finished Path!")
+        '''
+
+        #part 4.2
+        #leg is prepared - we know duration for 1st turn, forward, and 2nd turn
+        if self.phase == "initial_turn": 
+            self.phase_elapsed += self._period
+            twist_stamped.twist.linear.x = 0.0
+            if self.initial_angle_adjust == 0:
+                twist_stamped.twist.angular.z = 0.0
+            else:
+                twist_stamped.twist.angular.z = (self.initial_angle_adjust/abs(self.initial_angle_adjust)) * self.angular_speed
+            if self.phase_elapsed >= self.first_turn_duration:
+                self.phase = "move"
+                self.phase_elapsed = 0.0
+            
+            
+        elif self.phase == "move":
+            self.phase_elapsed += self._period
+            twist_stamped.twist.linear.x = self.linear_speed
+            twist_stamped.twist.angular.z = 0.0
+            if self.phase_elapsed >= self.forward_duration:
+                self.phase = "final_turn"
+                self.phase_elapsed = 0.0
+            
+
+        elif self.phase == "final_turn":
+            self.phase_elapsed += self._period
+            twist_stamped.twist.linear.x = 0.0
+            if self.final_angle_adjust == 0:
+                twist_stamped.twist.angular.z = 0.0
+            else:
+                twist_stamped.twist.angular.z = (self.final_angle_adjust/abs(self.final_angle_adjust)) * self.angular_speed
+            if self.phase_elapsed >= self.second_turn_duration:
+                self.waypoint_index += 1
+                if self.waypoint_index < len(self.waypoints) :
+                    self.prepare_leg()
+                self.phase = "initial_turn" 
+                self.phase_elapsed = 0.0
+            if self.waypoint_index == len(self.waypoints):
+                self.phase = "DONE" 
+                twist_stamped.twist.linear.x = 0.0
+                twist_stamped.twist.angular.z = 0.0
+                self.phase_elapsed = 0.0
+            
+     
+        else:
+            self.get_logger().info("Finished Path!")
+
 
         self.cmd_vel_pub.publish(twist_stamped)
         self._state_elapsed += self._period
